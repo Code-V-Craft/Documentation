@@ -3,10 +3,14 @@ fileMD - służy do przechowywania zawartości pliku .md
 content - przechowuje referencję do elementu z id="content"
 onceLoaded_index - zmienna logiczna, która przechowuje informację o tym, czy plik _index.md został już załadowany jest to tak zwana flaga, która zapobiega wielokrotnemu ładowaniu pliku _index.md
 */
-
+const reduceChars = /:|<|>| >|< |"/g;
+const webTitle = document.title;
 let fileMD = "";
 const content = document.querySelector("#content");
 let onceLoaded_index = false;
+
+const failureFetchFileIndex = 0;
+
 // Jednorazowe załadowanie pliku _index.md
 if (!onceLoaded_index) {
   loadPage("_index");
@@ -22,10 +26,12 @@ function loadPage(target) {
     .then((data) => {
       // Załadowanie zawartości pliku .md do zmiennej global
       fileMD = data;
-  
+
       // Sprawdzenie czy target jest równy _index aby jednorazowo przygotować menu nawigacyjne Dokumentacji
       if (target === "_index") {
         setupIndexPage();
+        scrollToSection("header-0");
+        changeActiveNav(target);
       }
     });
 }
@@ -43,7 +49,7 @@ function setupIndexPage() {
     { regex: /<\/h1>/g, replacement: "</a></li>" },
     { regex: /<h4>/g, replacement: '<li class="module">' },
     { regex: /<\/h2>/g, replacement: "</a></li>" },
-    { regex: /<details>/g, replacement: "<li><details open>" },
+    { regex: /<details>/g, replacement: "<li><details>" },
     { regex: /<\/summary>/g, replacement: "</summary><ul>" },
     { regex: /<\/details>/g, replacement: "</ul></details></li>" },
   ];
@@ -58,7 +64,7 @@ function setupIndexPage() {
 
   // Załadowanie kontentu na podstawie adresu URL
   urlSeter();
-
+  window.addEventListener("hashchange", urlSeter);
   // Nadanie funkcjonalności dla głównego menu nawigacyjnego Dokumentacji
   document.querySelectorAll("nav>ul li").forEach((li, index) => {
     let target; // Zmienna pomocnicza, do przechowywania lokalizacji pliku .md
@@ -71,10 +77,15 @@ function setupIndexPage() {
     ) {
       aTag.href = `#${
         li.parentElement.parentElement.querySelector("summary").innerText
-      }/${aTag.innerText}`;
+      }/${aTag.lastChild.textContent
+        .replace(reduceChars, "")
+        .replace("  ", " ")}`;
+
       target = aTag.href.split("#")[1] + "/" + aTag.href.split("#")[2];
     } else if (aTag) {
-      aTag.href = `#${aTag.innerText}`;
+      aTag.href = `#${aTag.innerText
+        .replace(reduceChars, "")
+        .replace("  ", " ")}`;
       target = aTag.innerText;
     }
 
@@ -87,8 +98,7 @@ function setupIndexPage() {
       let target = this.querySelector("a").href.split("#")[1];
 
       // Przypisanie pierwszego elementu znajdującego się nad kliknietym elementem li, który posiada klasę module
-      const moduleName =
-        findPreviousModule(this)?.innerText.split(":")[0];
+      const moduleName = findPreviousModule(this)?.innerText.split(":")[0];
       // Jeżeli nazwa modułu istnieje i pierwszy element tablicy zdekodowanego targetu jest różny od nazwy modułu to dodaj nazwę modułu do targetu
       if (moduleName && decodeURI(target.split("/")[0]) !== moduleName) {
         target = `${moduleName}/${target}`;
@@ -119,15 +129,16 @@ function setupIndexPage() {
           // Wywołanie funkcji generującej stronę
           setupPage(target);
           setupNavSidebar();
-          renderMathInElement(content);
+          scrollToSection("#header-0");
         });
     });
   });
+  wrapNonBreakingSpace(document.querySelector("nav>ul"));
 }
 
 // Funkcja findPreviousModule, która zwraca pierwszy element znajdujący się nad elementem, który posiada klasę module
 function findPreviousModule(element) {
-  let previousElement = element.previousElementSibling;// Przypisanie pierwszego elementu znajdującego się nad elementem
+  let previousElement = element.previousElementSibling; // Przypisanie pierwszego elementu znajdującego się nad elementem
   // Pętla while, która przechodzi przez wszystkie elementy znajdujące się nad elementem i sprawdza czy element posiada klasę module jeżeli tak to zwraca ten element
   while (previousElement) {
     if (previousElement.classList.contains("module")) {
@@ -142,8 +153,13 @@ function findPreviousModule(element) {
 function urlSeter() {
   let targetPage;
   const url = window.location.href;
-  let target = url.split("#")[1] || document.querySelector("nav>ul>li>a").innerText;
-  target = decodeURI(target).split("/");
+
+  let target =
+    url.split("#")[1] || document.querySelector("nav>ul>li>a").innerText;
+  target = decodeURI(target)
+    .replace(reduceChars, "")
+    .replace("  ", " ")
+    .split("/");
 
   // Przypisanie lokalizacji pliku .md zgodnie z długością tablicy target
   switch (target.length) {
@@ -178,15 +194,27 @@ function changeActiveNav(targetPage) {
 
   // Znalezienie elementu menu nawigacyjnego, który zawiera w sobie nazwę pliku .md
   const targetElement = Array.from(document.querySelectorAll("nav>ul a")).find(
-    (a) => a.innerText.includes(targetPage)
+    (a) => {
+      if (
+        a.textContent.replace(reduceChars, "").replace("  ", " ") === targetPage
+      )
+        return a;
+    }
   );
-
   // Jeżeli element istnieje to usuń klasę active ze wszystkich elementów menu nawigacyjnego i dodaj ją do elementu, który zawiera w sobie nazwę pliku .md
   if (targetElement) {
     document
       .querySelectorAll("nav>ul li")
       .forEach((li) => li.classList.remove("active"));
     targetElement.parentElement.classList.add("active");
+    const details = targetElement.parentElement.parentElement.parentElement;
+    if (details.tagName === "DETAILS") {
+      if (!details.hasAttribute("open")) {
+        details.setAttribute("open", "");
+      }
+
+      details.querySelector("summary>li").classList.add("active");
+    }
   }
 }
 
@@ -197,18 +225,83 @@ function setupPage(targetPage) {
   document.getElementById("content").innerHTML = htmlContent;
 
   // Dodanie kolorowania składni do bloków kodu
-  document
-    .querySelectorAll("pre code")
-    .forEach((block) => hljs.highlightElement(block));
+  document.querySelectorAll("pre code").forEach((block) => {
+    hljs.highlightElement(block);
+  });
+  //dodanie nagłówka do kodu
+  setHeaderCodeSmallBlockStyle();
   // Dodanie przycisków kopiuj do bloków kodu
   addCopyButtons();
 
   // Inicjalizacja zakładek i podpowiedzi
   initializeTabs();
   initializeHints();
-
   // Zmiana aktywnego elementu menu nawigacyjnego
   changeActiveNav(targetPage);
+  renderMathInElement(content);
+  setTittle();
+  removeEmptyTHead();
+
+  document.querySelectorAll("p>span>span").forEach((span) => {
+    if (
+      span.parentElement.parentElement.firstChild.nodeName === "SPAN" &&
+      span.parentElement.parentElement.parentElement.nodeName !== "LI" &&
+      span.classList.contains("katex-display")
+    ) {
+      span.style = "display: block!important";
+      console.log(span);
+    }
+  });
+
+  document.querySelectorAll("h1, h2, h3").forEach((header) => {
+    const brElement = document.createElement("br");
+    //dodanie po header znaczniku br
+    header.parentNode.insertBefore(brElement, header.nextSibling);
+  });
+  wrapNonBreakingSpace(content);
+}
+
+function removeEmptyTHead() {
+  let notEmptyTHead = false;
+  document.querySelectorAll("thead").forEach((thead) => {
+    thead.querySelectorAll("th").forEach((th) => {
+      if (th.innerText.trim() !== "") {
+        notEmptyTHead = true;
+      }
+    });
+    if (!notEmptyTHead) {
+      thead.remove();
+    }
+  });
+}
+
+function setTittle() {
+  try {
+    document.title =
+      webTitle + ": " + document.querySelector("#content h1").innerText;
+  } catch (error) {
+    const targetPage = window.location.href.split("/");
+    changeActiveNav(targetPage[targetPage.length - 1]);
+
+    const links = document.querySelectorAll("li.active");
+    links[links.length - 1].click();
+    document.title = webTitle;
+  }
+}
+
+function setHeaderCodeSmallBlockStyle() {
+  document.querySelectorAll("pre code").forEach((block) => {
+    const codeHeader = block.closest("pre").previousElementSibling;
+    if (
+      codeHeader &&
+      (codeHeader.tagName === "SMALL" ||
+        (codeHeader.tagName === "P" &&
+          codeHeader.children[0] &&
+          codeHeader.children[0].tagName === "SMALL"))
+    ) {
+      codeHeader.classList.add("code-header");
+    }
+  });
 }
 
 // Funkcja addCopyButtons, która dodaje przyciski kopiuj do bloków kodu
@@ -253,6 +346,7 @@ function initializeTabs() {
 
         tabButton.classList.add("active");
         tabContents[index].classList.add("active");
+        // setHeaderCodeSmallBlockStyle()
       });
     });
   });
@@ -264,6 +358,17 @@ function initializeHints() {
     const hintType = hint.getAttribute("data-hint");
     // Nadanie klasy w zależności od typu podpowiedzi
     hint.classList.add(`hint-${hintType}`);
+  });
+}
+
+// Funkcja scrollToSection, która przewija stronę do odpowiedniej sekcji w sposób płynny dzięki opcji behavior: "smooth"
+function scrollToSection(id) {
+  const section = document.querySelector(id);
+  if (!section) return;
+  const offsetTop = section.offsetTop - 60;
+  window.scrollTo({
+    top: offsetTop,
+    behavior: "smooth",
   });
 }
 
@@ -300,16 +405,6 @@ function setupNavSidebar() {
   const navLi = document.querySelectorAll("nav.sidebar ul li");
   let isScrolling = false;
 
-  // Funkcja scrollToSection, która przewija stronę do odpowiedniej sekcji w sposób płynny dzięki opcji behavior: "smooth"
-  function scrollToSection(id) {
-    const section = document.querySelector(id);
-    const offsetTop = section.offsetTop - 60;
-    window.scrollTo({
-      top: offsetTop,
-      behavior: "smooth",
-    });
-  }
-
   // Dodanie zdarzenia click na elementy menu bocznego
   navLi.forEach((li) => {
     li.addEventListener("click", function (event) {
@@ -318,14 +413,14 @@ function setupNavSidebar() {
       //#####################################################################################################################
       //# OPCJONALNE: Wyłączenie stylu przewijania po każdym elemencie aż do zakończenia przewijania do odpowiedniej sekcji #
       //#####################################################################################################################
-      isScrolling = true; 
+      isScrolling = true;
       //#####################################################################################################################
       scrollToSection(targetId);
 
       navLi.forEach((li) => li.classList.remove("active"));
       this.classList.add("active");
 
-       //#####################################################################################################################
+      //#####################################################################################################################
       //# OPCJONALNE: Wyłączenie stylu przewijania po każdym elemencie aż do zakończenia przewijania do odpowiedniej sekcji #
       //#####################################################################################################################
       setTimeout(() => {
@@ -367,14 +462,80 @@ function setupNavSidebar() {
   });
 }
 
-// Funkcja showLoadingPage, która pokazuje stronę ładowania dla wartości true i ukrywa dla wartości false
-function showLoadingPage(show) {
+function showLoadingPage(show, message) {
   const loadingPage = document.querySelector("#loading-doc-page");
-  setTimeout(() => {
-    if (show) {
-      loadingPage.style.display = "block";
-    } else {
-      loadingPage.style.display = "none";
+  const loadingMessage = document.querySelector(".loading-message");
+  if (message) {
+    loadingMessage.innerText = message;
+  }
+  if (show) {
+    loadingPage.style.display = "flex";
+  } else {
+    loadingPage.style.display = "none";
+  }
+}
+
+function checkLibrariesLoaded() {
+  if (typeof marked === "undefined") {
+    showLoadingPage(true, "Ładowanie komponentu konwersji treści: marked...");
+    return;
+  }
+  if (typeof hljs === "undefined") {
+    showLoadingPage(
+      true,
+      "Ładowanie komponentu formatowania kodu: highlight.js..."
+    );
+    return;
+  }
+  if (typeof renderMathInElement === "undefined") {
+    showLoadingPage(
+      true,
+      "Ładowanie komponentu zapisów matematycznych: KaTeX..."
+    );
+    return;
+  }
+  if (document.querySelector("#content").querySelectorAll("*").length == 0) {
+    showLoadingPage(true, "Ładowanie treści strony...");
+    return;
+  }
+
+  // All libraries are loaded and content is present
+  clearInterval(intervalId); // Stop checking
+  showLoadingPage(false, "");
+}
+
+showLoadingPage(true, "Ładowanie komponentów...");
+
+const intervalId = setInterval(checkLibrariesLoaded, 300); // Check every 300ms
+
+// Fixed plus signs getting separated in "C++" words
+
+function wrapNonBreakingSpace(node) {
+  node.childNodes.forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      // Zmień tylko tekstowe węzły
+      const text = child.textContent;
+      const replacedText = text.replace(
+        /C\+\+/g,
+        '<span style="white-space: nowrap;">C++</span>'
+      );
+      if (replacedText !== text) {
+        const tempDiv = document.createElement("div");
+        tempDiv.innerHTML = replacedText;
+        while (tempDiv.firstChild) {
+          child.before(tempDiv.firstChild);
+        }
+        child.remove();
+      }
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      // Dla elementów a, zmień tylko tekst, nie href
+      if (child.tagName === "A") {
+        const hrefValue = child.getAttribute("href");
+        wrapNonBreakingSpace(child);
+        child.setAttribute("href", hrefValue);
+      } else {
+        wrapNonBreakingSpace(child);
+      }
     }
-  }, 500);
+  });
 }
